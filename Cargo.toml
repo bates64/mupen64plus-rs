@@ -3,6 +3,11 @@ name = "mupen64plus"
 version = "0.1.0"
 edition = "2018"
 license = "GPL-2.0"
+keywords = ["mupen", "m64p", "n64"]
+categories = ["emulators", "api-bindings"]
+repository = "https://github.com/nanaian/mupen64plus-rs/"
+description = "High-level Rust bindings to the Mupen64Plus Core API"
+exclude = ["examples", "libs"]
 
 [dependencies]
 mupen64plus-sys = "*"
