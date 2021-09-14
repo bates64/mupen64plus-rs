@@ -5,6 +5,7 @@ use mupen64plus_sys::*;
 use crate::Error;
 use crate::plugin::*;
 
+/// The emulator core, also known as `libmupen64plus`.
 #[allow(dead_code)]
 pub struct Core {
     lib: m64p_dynlib_handle,
@@ -67,6 +68,13 @@ pub struct Core {
     debug_breakpoint_command: ptr_DebugBreakpointCommand,
     debug_breakpoint_triggered_by: ptr_DebugBreakpointTriggeredBy,
     debug_virtual_to_physical: ptr_DebugVirtualToPhysical,
+}
+
+/// A running instance of the emulator core, created with `Core::start`.
+pub struct Mupen {
+    core: Core,
+    plugins: Vec<Plugin>, // TODO: map for each plugin type
+    is_rom_open: bool, // TODO: replace with state check call
 }
 
 impl Core {
@@ -198,6 +206,8 @@ impl Core {
     }
 
     /// Startup the core and load configuration/data.
+    ///
+    /// `data_dir` should contain `mupen64plus.ini` and `mupencheat.txt`.
     pub fn start<P1, P2>(
         self,
         config_dir: Option<P1>,
@@ -241,19 +251,7 @@ impl Core {
     }
 }
 
-impl Drop for Core {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        use libloading::os::unix::Library;
-        #[cfg(windows)]
-        use libloading::os::windows::Library;
-
-        // Close the library
-        let lib = unsafe { Library::from_raw(self.lib) };
-        let _ = lib.close();
-    }
-}
-
+/// Logging callback for plugins.
 extern "C" fn debug_callback(
     _: *mut std::os::raw::c_void,
     level: std::os::raw::c_int,
@@ -273,10 +271,17 @@ extern "C" fn debug_callback(
     }
 }
 
-pub struct Mupen {
-    core: Core,
-    plugins: Vec<Plugin>, // TODO: map for each plugin type
-    is_rom_open: bool, // TODO: replace with state check call
+impl Drop for Core {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        use libloading::os::unix::Library;
+        #[cfg(windows)]
+        use libloading::os::windows::Library;
+
+        // Close the library
+        let lib = unsafe { Library::from_raw(self.lib) };
+        let _ = lib.close();
+    }
 }
 
 impl Mupen {
@@ -327,12 +332,14 @@ impl Mupen {
         self.is_rom_open
     }
 
+    /// Load an in-memory ROM into the core. It must be uncompressed but may be of any byte-order (v64, z64, n64).
     pub fn open_rom(&mut self, rom: &mut [u8]) -> Result<(), Error> {
         if self.is_rom_open() {
             self.close_rom()?
         }
 
         let ret = unsafe {
+            // Makes a copy of `rom` internally - we're not giving it ownership.
             self.core.core_do_command.unwrap()(
                 m64p_command_M64CMD_ROM_OPEN,
                 rom.len() as i32,
@@ -347,6 +354,7 @@ impl Mupen {
         }
     }
 
+    /// Execute the ROM. Blocking until the ROM is closed.
     pub fn execute(&mut self) -> Result<(), Error> {
         let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_EXECUTE, 0, std::ptr::null_mut()) };
         if ret != m64p_error_M64ERR_SUCCESS {
@@ -356,6 +364,7 @@ impl Mupen {
         }
     }
 
+    /// Stop ROM execution.
     pub fn stop(&mut self) -> Result<(), Error> {
         let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_STOP, 0, std::ptr::null_mut()) };
         if ret != m64p_error_M64ERR_SUCCESS {
@@ -365,6 +374,7 @@ impl Mupen {
         }
     }
 
+    /// Close the ROM.
     pub fn close_rom(&mut self) -> Result<(), Error> {
         let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_ROM_CLOSE, 0, std::ptr::null_mut()) };
         if ret != m64p_error_M64ERR_SUCCESS {
