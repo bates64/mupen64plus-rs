@@ -12,8 +12,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load the core library.
     let core = Core::load_from_directory(&path)
         .or_else(|_| Core::load_from_system())?;
-    let core_version = core.get_version()?;
-    log::info!("loaded core: {} {}", core_version.plugin_name, core_version.plugin_version);
 
     // Launch the core and load configuration.
     let mut mupen = core.start(Some(&path), Some(&path))?;
@@ -23,9 +21,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load the plugins - the order is important.
     for name in &["video-glide64mk2", "audio-sdl", "input-sdl", "rsp-hle"] {
-        mupen.attach_plugin(Plugin::load_from_path(format!("{}/mupen64plus-{}.{}", &path, name, DLL_EXTENSION))?)?;
+        let p = format!("{}/mupen64plus-{}.{}", &path, name, DLL_EXTENSION);
+        mupen.attach_plugin(Plugin::load_from_path(p)?)?;
     }
 
+    // Run the ROM!
     mupen.execute()?;
 
     Ok(())
