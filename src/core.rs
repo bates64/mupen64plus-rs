@@ -1,9 +1,11 @@
 use std::path::Path;
-use std::ffi::CStr;
+use std::ffi::{CStr, c_void};
 use libloading::Library;
 use mupen64plus_sys::*;
-use crate::Error;
+use thiserror::Error;
+use crate::MupenError;
 use crate::plugin::*;
+use crate::vidext::Video;
 
 /// The emulator core, also known as `libmupen64plus`.
 #[allow(dead_code)]
@@ -70,11 +72,15 @@ pub struct Core {
     debug_virtual_to_physical: ptr_DebugVirtualToPhysical,
 }
 
+unsafe impl Send for Core {}
+unsafe impl Sync for Core {}
+
 /// A running instance of the emulator core, created with `Core::start`.
 pub struct Mupen {
     core: Core,
     plugins: Vec<Plugin>, // TODO: map for each plugin type
     is_rom_open: bool, // TODO: replace with state check call
+    video_extension: Option<Box<m64p_video_extension_functions>>,
 }
 
 impl Core {
@@ -189,7 +195,7 @@ impl Core {
         Ok(plugin)
     }
 
-    pub fn get_version(&self) -> Result<PluginVersion, Error> {
+    pub fn get_version(&self) -> Result<PluginVersion, MupenError> {
         PluginVersion::from_ffi(self.plugin_get_version)
     }
 }
@@ -212,7 +218,7 @@ impl Core {
         self,
         config_dir: Option<P1>,
         data_dir: Option<P2>
-    ) -> Result<Mupen, Error>
+    ) -> Result<Mupen, MupenError>
     where
         P1: AsRef<Path>,
         P2: AsRef<Path>,
@@ -247,6 +253,7 @@ impl Core {
             core: self,
             plugins: Vec::with_capacity(4),
             is_rom_open: false,
+            video_extension: None,
         })
     }
 }
@@ -284,6 +291,16 @@ impl Drop for Core {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum AttachError {
+    #[error("no PluginStartup() function found")]
+    NoPluginStartup,
+    #[error("no ROM open")]
+    NoRomOpen,
+    #[error("{0}")]
+    MupenError(#[from] MupenError),
+}
+
 impl Mupen {
     /// Attach a plugin, replacing any existing plugin of the same type.
     /// Plugins must be loaded in this order:
@@ -291,10 +308,10 @@ impl Mupen {
     /// 2. Audio
     /// 3. Input
     /// 4. RSP
-    pub fn attach_plugin(&mut self, plugin: Plugin) -> Result<(), Error> {
+    pub fn attach_plugin(&mut self, plugin: Plugin) -> Result<(), AttachError> {
         // Without this check, we get an unhelpful InvalidState 
         if !self.is_rom_open() {
-            return Err(Error::NoRomOpen);
+            return Err(AttachError::NoRomOpen);
         }
 
         // TODO: enforce plugin loading order
@@ -307,7 +324,7 @@ impl Mupen {
                 f(self.core.lib, std::ptr::null_mut(), Some(debug_callback));
             };
         } else {
-            return Err(Error::NoPluginStartup);
+            return Err(AttachError::NoPluginStartup);
         }
 
         log::trace!("plugin {:?} CoreAttachPlugin()", version.plugin_name);
@@ -316,6 +333,7 @@ impl Mupen {
             self.core.core_attach_plugin.unwrap()(version.plugin_type.into(), plugin.lib)
         };
         if ret != m64p_error_M64ERR_SUCCESS {
+            let ret: MupenError = ret.into();
             return Err(ret.into());
         }
 
@@ -328,12 +346,24 @@ impl Mupen {
 
     // TODO: detach_plugin (by type?)
 
+    /// Override SDL-based OpenGL functions. May only be called once, ever!
+    pub fn use_video_extension<V: Video>(&mut self) {
+        assert!(self.video_extension.is_none(), "video extension already set");
+
+        let ptr = Box::into_raw(Box::new(crate::vidext::override_video::<V>()));
+
+        unsafe {
+            self.core.core_override_vid_ext.unwrap()(ptr);
+            self.video_extension = Some(Box::from_raw(ptr)); // No leaks!
+        }
+    }
+
     pub fn is_rom_open(&self) -> bool {
         self.is_rom_open
     }
 
     /// Load an in-memory ROM into the core. It must be uncompressed but may be of any byte-order (v64, z64, n64).
-    pub fn open_rom(&mut self, rom: &mut [u8]) -> Result<(), Error> {
+    pub fn open_rom(&mut self, rom: &mut [u8]) -> Result<(), MupenError> {
         if self.is_rom_open() {
             self.close_rom()?
         }
@@ -355,7 +385,7 @@ impl Mupen {
     }
 
     /// Execute the ROM. Blocking until the ROM is closed.
-    pub fn execute(&mut self) -> Result<(), Error> {
+    pub fn execute(&mut self) -> Result<(), MupenError> {
         let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_EXECUTE, 0, std::ptr::null_mut()) };
         if ret != m64p_error_M64ERR_SUCCESS {
             Err(ret.into())
@@ -365,7 +395,7 @@ impl Mupen {
     }
 
     /// Stop ROM execution.
-    pub fn stop(&mut self) -> Result<(), Error> {
+    pub fn stop(&mut self) -> Result<(), MupenError> {
         let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_STOP, 0, std::ptr::null_mut()) };
         if ret != m64p_error_M64ERR_SUCCESS {
             Err(ret.into())
@@ -375,7 +405,7 @@ impl Mupen {
     }
 
     /// Close the ROM.
-    pub fn close_rom(&mut self) -> Result<(), Error> {
+    pub fn close_rom(&mut self) -> Result<(), MupenError> {
         let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_ROM_CLOSE, 0, std::ptr::null_mut()) };
         if ret != m64p_error_M64ERR_SUCCESS {
             Err(ret.into())
@@ -383,6 +413,39 @@ impl Mupen {
             self.is_rom_open = false;
             Ok(())
         }
+    }
+
+    fn get_core_param(&self, param: m64p_core_param) -> Result<u32, MupenError> {
+        let mut value = 0;
+        let value_ptr = &mut value as *mut u32;
+
+        let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_CORE_STATE_SET, param as i32, value_ptr as *mut c_void) };
+        if ret != m64p_error_M64ERR_SUCCESS {
+            Err(ret.into())
+        } else {
+            Ok(value)
+        }
+    }
+
+    fn set_core_param(&mut self, param: m64p_core_param, value: u32) -> Result<(), MupenError> {
+        let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_CORE_STATE_SET, param as i32, value as *mut c_void) };
+        if ret != m64p_error_M64ERR_SUCCESS {
+            Err(ret.into())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn video_size(&self) -> Result<(u16, u16), MupenError> {
+        let size = self.get_core_param(m64p_core_param_M64CORE_VIDEO_SIZE)?;
+        Ok(((size >> 16) as u16, (size & 0xFFFF) as u16))
+    }
+
+    pub fn set_video_size(&mut self, width: u16, height: u16) -> Result<(), MupenError> {
+        self.set_core_param(
+            m64p_core_param_M64CORE_VIDEO_SIZE,
+            (width as u32) << 16 | (height as u32),
+        )
     }
 }
 

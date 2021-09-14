@@ -1,14 +1,18 @@
 use thiserror::Error;
 use mupen64plus_sys::*;
 
+pub use mupen64plus_sys as sys;
+
 pub mod core;
 pub mod plugin;
+pub mod vidext;
 
 pub use crate::core::Core;
 pub use plugin::Plugin;
+pub use vidext::Video;
 
 #[derive(Error, Debug)]
-pub enum Error {
+pub enum MupenError {
     #[error("a function was called before its associated module was initialized")]
     NotInit,
     #[error("initialization function called twice")]
@@ -29,7 +33,7 @@ pub enum Error {
     Internal,
     #[error("current program state does not allow operations")]
     InvalidState,
-    #[error("a plugin fucntion returned a fatal error")]
+    #[error("a plugin function returned a fatal error")]
     PluginFail,
     #[error("a system function call, such as an SDL or file operation, failed")]
     SystemFail,
@@ -37,32 +41,27 @@ pub enum Error {
     Unsupported,
     #[error("a given input type parameter cannot be used for desired operation")]
     WrongType,
-
-    #[error("no PluginStartup() function found")]
-    NoPluginStartup,
-    #[error("no ROM open")]
-    NoRomOpen,
 }
 
-impl From<m64p_error> for Error {
+impl From<m64p_error> for MupenError {
     fn from(err: m64p_error) -> Self {
         #[allow(non_upper_case_globals)]
         match err {
             m64p_error_M64ERR_SUCCESS => panic!("refusing to convert m64p_error=SUCCESS to Error"),
-            m64p_error_M64ERR_ALREADY_INIT => Error::AlreadyInit,
-            m64p_error_M64ERR_NOT_INIT => Error::NotInit,
-            m64p_error_M64ERR_INCOMPATIBLE => Error::Incompatible,
-            m64p_error_M64ERR_INPUT_ASSERT => Error::InputAssert,
-            m64p_error_M64ERR_INPUT_INVALID => Error::InputInvalid,
-            m64p_error_M64ERR_INPUT_NOT_FOUND => Error::InputNotFound,
-            m64p_error_M64ERR_NO_MEMORY => Error::NoMemory,
-            m64p_error_M64ERR_FILES => Error::Files,
-            m64p_error_M64ERR_INTERNAL => Error::Internal,
-            m64p_error_M64ERR_INVALID_STATE => Error::InvalidState,
-            m64p_error_M64ERR_PLUGIN_FAIL => Error::PluginFail,
-            m64p_error_M64ERR_SYSTEM_FAIL => Error::SystemFail,
-            m64p_error_M64ERR_UNSUPPORTED => Error::Unsupported,
-            m64p_error_M64ERR_WRONG_TYPE => Error::WrongType,
+            m64p_error_M64ERR_ALREADY_INIT => Self::AlreadyInit,
+            m64p_error_M64ERR_NOT_INIT => Self::NotInit,
+            m64p_error_M64ERR_INCOMPATIBLE => Self::Incompatible,
+            m64p_error_M64ERR_INPUT_ASSERT => Self::InputAssert,
+            m64p_error_M64ERR_INPUT_INVALID => Self::InputInvalid,
+            m64p_error_M64ERR_INPUT_NOT_FOUND => Self::InputNotFound,
+            m64p_error_M64ERR_NO_MEMORY => Self::NoMemory,
+            m64p_error_M64ERR_FILES => Self::Files,
+            m64p_error_M64ERR_INTERNAL => Self::Internal,
+            m64p_error_M64ERR_INVALID_STATE => Self::InvalidState,
+            m64p_error_M64ERR_PLUGIN_FAIL => Self::PluginFail,
+            m64p_error_M64ERR_SYSTEM_FAIL => Self::SystemFail,
+            m64p_error_M64ERR_UNSUPPORTED => Self::Unsupported,
+            m64p_error_M64ERR_WRONG_TYPE => Self::WrongType,
             _ => panic!("unknown m64p_error={}", err),
         }
     }

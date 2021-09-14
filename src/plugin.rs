@@ -4,7 +4,8 @@ use bitflags::bitflags;
 use std::ffi::CStr;
 use std::path::Path;
 use libloading::Library;
-use crate::Error;
+use thiserror::Error;
+use crate::MupenError;
 
 pub const MINIMUM_CORE_VERSION: Version = mupen_to_version(0x016300);
 pub const CORE_API_VERSION: Version = mupen_to_version(0x020001);
@@ -18,7 +19,7 @@ pub enum LoadError {
     #[error("plugin version ({0}) is unsupported")]
     IncompatibleVersion(Version),
     #[error("m64p_error: {0}")]
-    M64Err(#[from] Error),
+    M64Err(#[from] MupenError),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -98,7 +99,7 @@ impl PluginVersion<'_> {
         !(self.plugin_version < MINIMUM_CORE_VERSION || self.api_version.major != CORE_API_VERSION.major)
     }
 
-    pub(crate) fn from_ffi<'a>(plugin_get_version: ptr_PluginGetVersion) -> Result<PluginVersion<'a>, Error> {
+    pub(crate) fn from_ffi<'a>(plugin_get_version: ptr_PluginGetVersion) -> Result<PluginVersion<'a>, MupenError> {
         let mut plugin_type = 0;
         let mut plugin_version = 0;
         let mut api_version = 0;
@@ -174,7 +175,7 @@ impl Plugin {
         Ok(plugin)
     }
 
-    pub fn get_version(&self) -> Result<PluginVersion<'_>, Error> {
+    pub fn get_version(&self) -> Result<PluginVersion<'_>, MupenError> {
         PluginVersion::from_ffi(self.plugin_get_version)
     }
 }
@@ -191,3 +192,6 @@ impl Drop for Plugin {
         let _ = lib.close();
     }
 }
+
+unsafe impl Send for Plugin {}
+unsafe impl Sync for Plugin {}
