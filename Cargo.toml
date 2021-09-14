@@ -10,8 +10,8 @@ description = "High-level Rust bindings to the Mupen64Plus Core API"
 exclude = ["examples", "libs"]
 
 [dependencies]
-mupen64plus-sys = "*"
-libloading = "*"
+mupen64plus-sys = "0.1"
+libloading = "0.7"
 thiserror = "1"
 semver = "1"
 bitflags = "1"
