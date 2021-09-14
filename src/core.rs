@@ -267,6 +267,9 @@ extern "C" fn debug_callback(
     let level = level as m64p_msg_level;
     let message = unsafe { CStr::from_ptr(message).to_string_lossy() };
 
+    // Sometimes debug_callback is called with extra trailing newlines; we don't want em.
+    let message = message.trim_end_matches('\n');
+
     #[allow(non_upper_case_globals)]
     match level {
         m64p_msg_level_M64MSG_INFO => log::info!("{}", message),
