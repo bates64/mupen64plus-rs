@@ -91,31 +91,21 @@ pub const fn version_to_mupen(v: &Version) -> i32 {
     ((v.major as i32) << 16) | ((v.minor as i32) << 8) | (v.patch as i32)
 }
 
-pub trait Plugin: Sized {
-    fn load_from_path<P>(shared_object_path: P) -> Result<Self, LoadError>
-    where
-        P: AsRef<Path>
-    {
-        Self::load_from_library(unsafe {
-            Library::new(shared_object_path.as_ref().as_os_str())?
-        })
+impl PluginVersion<'_> {
+    pub fn is_compatible(&self) -> bool {
+        // This is how mupen64plus-ui-console checks for version compatibility, but it may be wise
+        // to use a semver expression instead.
+        !(self.plugin_version < MINIMUM_CORE_VERSION || self.api_version.major != CORE_API_VERSION.major)
     }
 
-    fn load_from_library<L>(lib: L) -> Result<Self, LoadError>
-    where
-        L: Into<Library>;
-
-    #[doc(hidden)]
-    fn _plugin_get_version(&self) -> &ptr_PluginGetVersion;
-
-    fn get_version(&self) -> Result<PluginVersion<'_>, Error> {
+    pub(crate) fn from_ffi<'a>(plugin_get_version: ptr_PluginGetVersion) -> Result<PluginVersion<'a>, Error> {
         let mut plugin_type = 0;
         let mut plugin_version = 0;
         let mut api_version = 0;
         let mut plugin_name = std::ptr::null();
         let mut capabilities = 0;
         unsafe {
-            let ret = self._plugin_get_version().unwrap()(&mut plugin_type, &mut plugin_version, &mut api_version, &mut plugin_name, &mut capabilities);
+            let ret = plugin_get_version.unwrap()(&mut plugin_type, &mut plugin_version, &mut api_version, &mut plugin_name, &mut capabilities);
             if ret != m64p_error_M64ERR_SUCCESS {
                 return Err(ret.into());
             }
@@ -132,27 +122,24 @@ pub trait Plugin: Sized {
     }
 }
 
-impl PluginVersion<'_> {
-    pub fn is_compatible(&self) -> bool {
-        // This is how mupen64plus-ui-console checks for version compatibility, but it may be wise
-        // to use a semver expression instead.
-        !(self.plugin_version < MINIMUM_CORE_VERSION || self.api_version.major != CORE_API_VERSION.major)
-    }
-}
-
-pub struct AnyPlugin {
+pub struct Plugin {
     pub(crate) lib: m64p_dynlib_handle,
     plugin_get_version: ptr_PluginGetVersion,
     pub(crate) plugin_startup: ptr_PluginStartup,
     pub(crate) plugin_shutdown: ptr_PluginShutdown,
 }
 
-impl Plugin for AnyPlugin {
-    fn _plugin_get_version(&self) -> &ptr_PluginGetVersion {
-        &self.plugin_get_version
+impl Plugin {
+    pub fn load_from_path<P>(dylib_path: P) -> Result<Self, LoadError>
+    where
+        P: AsRef<Path>
+    {
+        Self::load_from_library(unsafe {
+            Library::new(dylib_path.as_ref().as_os_str())?
+        })
     }
 
-    fn load_from_library<L>(lib: L) -> Result<Self, LoadError>
+    pub fn load_from_library<L>(lib: L) -> Result<Self, LoadError>
     where
         L: Into<Library>
     {
@@ -186,9 +173,13 @@ impl Plugin for AnyPlugin {
 
         Ok(plugin)
     }
+
+    pub fn get_version(&self) -> Result<PluginVersion<'_>, Error> {
+        PluginVersion::from_ffi(self.plugin_get_version)
+    }
 }
 
-impl Drop for AnyPlugin {
+impl Drop for Plugin {
     fn drop(&mut self) {
         #[cfg(unix)]
         use libloading::os::unix::Library;

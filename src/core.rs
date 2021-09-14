@@ -69,12 +69,17 @@ pub struct Core {
     debug_virtual_to_physical: ptr_DebugVirtualToPhysical,
 }
 
-impl Plugin for Core {
-    fn _plugin_get_version(&self) -> &ptr_PluginGetVersion {
-        &self.plugin_get_version
+impl Core {
+    pub fn load_from_path<P>(dylib_path: P) -> Result<Self, LoadError>
+    where
+        P: AsRef<Path>
+    {
+        Self::load_from_library(unsafe {
+            Library::new(dylib_path.as_ref().as_os_str())?
+        })
     }
 
-    fn load_from_library<L>(lib: L) -> Result<Self, LoadError>
+    pub fn load_from_library<L>(lib: L) -> Result<Self, LoadError>
     where
         L: Into<Library>
     {
@@ -175,6 +180,10 @@ impl Plugin for Core {
 
         Ok(plugin)
     }
+
+    pub fn get_version(&self) -> Result<PluginVersion, Error> {
+        PluginVersion::from_ffi(self.plugin_get_version)
+    }
 }
 
 impl Core {
@@ -266,7 +275,7 @@ extern "C" fn debug_callback(
 
 pub struct Mupen {
     core: Core,
-    plugins: Vec<AnyPlugin>, // TODO: map for each plugin type
+    plugins: Vec<Plugin>, // TODO: map for each plugin type
     is_rom_open: bool, // TODO: replace with state check call
 }
 
@@ -277,7 +286,7 @@ impl Mupen {
     /// 2. Audio
     /// 3. Input
     /// 4. RSP
-    pub fn attach_plugin(&mut self, plugin: AnyPlugin) -> Result<(), Error> {
+    pub fn attach_plugin(&mut self, plugin: Plugin) -> Result<(), Error> {
         // Without this check, we get an unhelpful InvalidState 
         if !self.is_rom_open() {
             return Err(Error::NoRomOpen);

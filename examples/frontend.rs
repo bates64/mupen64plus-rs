@@ -2,7 +2,7 @@ use std::env::consts::DLL_EXTENSION;
 use std::io::prelude::*;
 use std::fs::File;
 
-use mupen64plus::{Plugin, Core, plugin::AnyPlugin};
+use mupen64plus::{Core, Plugin};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     pretty_env_logger::init();
@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load the plugins - the order is important.
     for name in &["video-glide64mk2", "audio-sdl", "input-sdl", "rsp-hle"] {
-        mupen.attach_plugin(AnyPlugin::load_from_path(format!("{}/mupen64plus-{}.{}", &path, name, DLL_EXTENSION))?)?;
+        mupen.attach_plugin(Plugin::load_from_path(format!("{}/mupen64plus-{}.{}", &path, name, DLL_EXTENSION))?)?;
     }
 
     mupen.execute()?;
