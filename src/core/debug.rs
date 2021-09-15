@@ -1,13 +1,21 @@
 use crate::Error;
 use super::{Core, Mupen};
 use mupen64plus_sys::*;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
+use std::rc::Rc;
 use std::ops::{RangeBounds, Bound};
 
+// thread_local is OK because Debugger is !Send (due to Rc)
 thread_local! {
     static INIT_SUBSCRIBERS: Mutex<Vec<Box<dyn FnMut()>>> = Mutex::new(Vec::new());
     static UPDATE_SUBSCRIBERS: Mutex<Vec<Box<dyn FnMut(u32)>>> = Mutex::new(Vec::new());
     static VI_SUBSCRIBERS: Mutex<Vec<Box<dyn FnMut()>>> = Mutex::new(Vec::new());
+}
+
+pub(super) fn clear_subscribers() {
+    INIT_SUBSCRIBERS.with(|s| s.lock().unwrap().clear());
+    UPDATE_SUBSCRIBERS.with(|s| s.lock().unwrap().clear());
+    VI_SUBSCRIBERS.with(|s| s.lock().unwrap().clear());
 }
 
 extern "C" fn callback_init() {
@@ -37,10 +45,10 @@ extern "C" fn callback_vi() {
     });
 }
 
-/// Handle to debugger API. Uses an Arc so can be cloned cheaply.
+/// Handle to debugger API. Uses reference-counting for cheap cloning (e.g. passing to closures).
 #[derive(Clone)]
 pub struct Debugger {
-    core: Arc<Core>,
+    core: Rc<Core>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -495,18 +503,6 @@ impl Debugger {
     pub fn write_u8(&self, address: u32, value: u8) {
         unsafe {
             self.core.debug_mem_write8.unwrap()(address, value)
-        }
-    }
-}
-
-// XXX: bad
-impl Drop for Debugger {
-    fn drop(&mut self) {
-        if Arc::strong_count(&self.core) == 1 {
-            // This is the last reference to the core, so clear subscribers.
-            INIT_SUBSCRIBERS.with(|s| s.lock().unwrap().clear());
-            UPDATE_SUBSCRIBERS.with(|s| s.lock().unwrap().clear());
-            VI_SUBSCRIBERS.with(|s| s.lock().unwrap().clear());
         }
     }
 }

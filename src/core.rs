@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::ffi::CStr;
-use std::sync::Arc;
+use std::rc::Rc;
 use libloading::Library;
 use mupen64plus_sys::*;
 use crate::Error;
@@ -75,7 +75,7 @@ pub struct Core {
 
 /// A running instance of the emulator core, created with `Core::start`.
 pub struct Mupen {
-    core: Arc<Core>,
+    core: Rc<Core>,
     plugins: Vec<Plugin>, // TODO: map for each plugin type
     is_rom_open: bool, // TODO: replace with state check call
 }
@@ -247,7 +247,7 @@ impl Core {
         drop(data_dir);
 
         Ok(Mupen {
-            core: Arc::new(self),
+            core: Rc::new(self),
             plugins: Vec::with_capacity(4),
             is_rom_open: false,
         })
@@ -406,8 +406,7 @@ impl Drop for Mupen {
                 }
             }
         }
+
+        debug::clear_subscribers();
     }
 }
-
-unsafe impl Send for Core {}
-unsafe impl Sync for Core {}
