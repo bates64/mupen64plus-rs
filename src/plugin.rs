@@ -191,3 +191,6 @@ impl Drop for Plugin {
         let _ = lib.close();
     }
 }
+
+unsafe impl Send for Plugin {}
+unsafe impl Sync for Plugin {}

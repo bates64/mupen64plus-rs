@@ -1,9 +1,12 @@
 use std::path::Path;
 use std::ffi::CStr;
+use std::sync::Arc;
 use libloading::Library;
 use mupen64plus_sys::*;
 use crate::Error;
 use crate::plugin::*;
+
+pub mod debug;
 
 /// The emulator core, also known as `libmupen64plus`.
 #[allow(dead_code)]
@@ -72,7 +75,7 @@ pub struct Core {
 
 /// A running instance of the emulator core, created with `Core::start`.
 pub struct Mupen {
-    core: Core,
+    core: Arc<Core>,
     plugins: Vec<Plugin>, // TODO: map for each plugin type
     is_rom_open: bool, // TODO: replace with state check call
 }
@@ -244,7 +247,7 @@ impl Core {
         drop(data_dir);
 
         Ok(Mupen {
-            core: self,
+            core: Arc::new(self),
             plugins: Vec::with_capacity(4),
             is_rom_open: false,
         })
@@ -355,7 +358,7 @@ impl Mupen {
     }
 
     /// Execute the ROM. Blocking until the ROM is closed.
-    pub fn execute(&mut self) -> Result<(), Error> {
+    pub fn execute(&self) -> Result<(), Error> {
         let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_EXECUTE, 0, std::ptr::null_mut()) };
         if ret != m64p_error_M64ERR_SUCCESS {
             Err(ret.into())
@@ -365,7 +368,7 @@ impl Mupen {
     }
 
     /// Stop ROM execution.
-    pub fn stop(&mut self) -> Result<(), Error> {
+    pub fn stop(&self) -> Result<(), Error> {
         let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_STOP, 0, std::ptr::null_mut()) };
         if ret != m64p_error_M64ERR_SUCCESS {
             Err(ret.into())
@@ -405,3 +408,6 @@ impl Drop for Mupen {
         }
     }
 }
+
+unsafe impl Send for Core {}
+unsafe impl Sync for Core {}

@@ -3,6 +3,7 @@ use std::io::prelude::*;
 use std::fs::File;
 
 use mupen64plus::{Core, Plugin};
+use mupen64plus::core::debug::Breakpoint;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     pretty_env_logger::init();
@@ -23,6 +24,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for name in &["video-glide64mk2", "audio-sdl", "input-sdl", "rsp-hle"] {
         let p = format!("{}/mupen64plus-{}.{}", &path, name, DLL_EXTENSION);
         mupen.attach_plugin(Plugin::load_from_path(p)?)?;
+    }
+
+    if let Ok(debug) = mupen.debug() {
+        // When debug() is used, the emulator starts paused. Unpause it.
+        let d = debug.clone(); // This is cheap - debug uses reference-counting.
+        debug.on_init(Box::new(move || {
+            println!("Starting emulation!");
+            d.run().unwrap();
+        }));
+
+        // Add some breakpoints
+        debug.add_breakpoint(0x800FB4A8);
+        debug.add_breakpoint(
+            Breakpoint::range(0..=u32::MAX).read()
+        );
+
+        // on_update is called whenever a breakpoint is hit or the emulation is stepped.
+        let d = debug.clone();
+        debug.on_update(Box::new(move |pc| {
+            // Print out the instruction and registers.
+            let (op, args) = d.disassemble(d.read_u32(pc), pc);
+            println!("hit breakpoint at {:#X}", pc);
+            println!("{} {}", op, args);
+            println!("{:#X?}", d.registers());
+
+            // We hit a breakpoint, so emulation was paused. Unpause it.
+            d.run().unwrap();
+        }));
+    } else {
+        eprintln!("Mupen64Plus core does not support debugging");
     }
 
     // Run the ROM!
