@@ -1,6 +1,6 @@
 [package]
 name = "mupen64plus"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2018"
 license = "GPL-2.0"
 keywords = ["mupen", "m64p", "n64"]
@@ -10,7 +10,7 @@ description = "High-level Rust bindings to the Mupen64Plus Core API"
 exclude = ["examples", "libs"]
 
 [dependencies]
-mupen64plus-sys = "0.1"
+mupen64plus-sys = "0.2"
 libloading = "0.7"
 thiserror = "1"
 semver = "1"

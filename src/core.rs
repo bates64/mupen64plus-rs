@@ -1,10 +1,10 @@
-use std::path::Path;
-use std::ffi::CStr;
-use std::rc::Rc;
+use crate::plugin::*;
+use crate::Error;
 use libloading::Library;
 use mupen64plus_sys::*;
-use crate::Error;
-use crate::plugin::*;
+use std::ffi::CStr;
+use std::path::Path;
+use std::rc::Rc;
 
 pub mod debug;
 
@@ -41,9 +41,6 @@ pub struct Core {
     config_get_param_float: ptr_ConfigGetParamFloat,
     config_get_param_bool: ptr_ConfigGetParamBool,
     config_get_param_string: ptr_ConfigGetParamString,
-    config_external_open: ptr_ConfigExternalOpen,
-    config_external_close: ptr_ConfigExternalClose,
-    config_external_get_parameter: ptr_ConfigExternalGetParameter,
     config_has_unsaved_changes: ptr_ConfigHasUnsavedChanges,
     config_get_shared_data_filepath: ptr_ConfigGetSharedDataFilepath,
     config_get_user_config_path: ptr_ConfigGetUserConfigPath,
@@ -69,30 +66,26 @@ pub struct Core {
     debug_get_cpu_data_ptr: ptr_DebugGetCPUDataPtr,
     debug_breakpoint_lookup: ptr_DebugBreakpointLookup,
     debug_breakpoint_command: ptr_DebugBreakpointCommand,
-    debug_breakpoint_triggered_by: ptr_DebugBreakpointTriggeredBy,
-    debug_virtual_to_physical: ptr_DebugVirtualToPhysical,
 }
 
 /// A running instance of the emulator core, created with `Core::start`.
 pub struct Mupen {
     core: Rc<Core>,
     plugins: Vec<Plugin>, // TODO: map for each plugin type
-    is_rom_open: bool, // TODO: replace with state check call
+    is_rom_open: bool,    // TODO: replace with state check call
 }
 
 impl Core {
     pub fn load_from_path<P>(dylib_path: P) -> Result<Self, LoadError>
     where
-        P: AsRef<Path>
+        P: AsRef<Path>,
     {
-        Self::load_from_library(unsafe {
-            Library::new(dylib_path.as_ref().as_os_str())?
-        })
+        Self::load_from_library(unsafe { Library::new(dylib_path.as_ref().as_os_str())? })
     }
 
     pub fn load_from_library<L>(lib: L) -> Result<Self, LoadError>
     where
-        L: Into<Library>
+        L: Into<Library>,
     {
         let lib = lib.into();
 
@@ -137,9 +130,6 @@ impl Core {
             config_get_param_float: load_func!(ptr_ConfigGetParamFloat),
             config_get_param_bool: load_func!(ptr_ConfigGetParamBool),
             config_get_param_string: load_func!(ptr_ConfigGetParamString),
-            config_external_open: load_func!(ptr_ConfigExternalOpen),
-            config_external_close: load_func!(ptr_ConfigExternalClose),
-            config_external_get_parameter: load_func!(ptr_ConfigExternalGetParameter),
             config_has_unsaved_changes: load_func!(ptr_ConfigHasUnsavedChanges),
             config_get_shared_data_filepath: load_func!(ptr_ConfigGetSharedDataFilepath),
             config_get_user_config_path: load_func!(ptr_ConfigGetUserConfigPath),
@@ -165,8 +155,6 @@ impl Core {
             debug_get_cpu_data_ptr: load_func!(ptr_DebugGetCPUDataPtr),
             debug_breakpoint_lookup: load_func!(ptr_DebugBreakpointLookup),
             debug_breakpoint_command: load_func!(ptr_DebugBreakpointCommand),
-            debug_breakpoint_triggered_by: load_func!(ptr_DebugBreakpointTriggeredBy),
-            debug_virtual_to_physical: load_func!(ptr_DebugVirtualToPhysical),
 
             lib: {
                 #[cfg(unix)]
@@ -205,37 +193,47 @@ impl Core {
     }
 
     pub fn load_from_directory(dir: &str) -> Result<Self, LoadError> {
-        Self::load_from_path(format!("{}/{}", dir, libloading::library_filename("mupen64plus").to_string_lossy()))
+        Self::load_from_path(format!(
+            "{}/{}",
+            dir,
+            libloading::library_filename("mupen64plus").to_string_lossy()
+        ))
     }
 
     /// Startup the core and load configuration/data.
     ///
     /// `data_dir` should contain `mupen64plus.ini` and `mupencheat.txt`.
-    pub fn start<P1, P2>(
-        self,
-        config_dir: Option<P1>,
-        data_dir: Option<P2>
-    ) -> Result<Mupen, Error>
+    pub fn start<P1, P2>(self, config_dir: Option<P1>, data_dir: Option<P2>) -> Result<Mupen, Error>
     where
         P1: AsRef<Path>,
         P2: AsRef<Path>,
     {
-        let config_dir = config_dir.and_then(|s| s.as_ref()
-            .to_str()
-            .and_then(|p| std::ffi::CString::new(p).ok()));
-        let data_dir = data_dir.and_then(|s| s.as_ref()
-            .to_str()
-            .and_then(|p| std::ffi::CString::new(p).ok()));
+        let config_dir = config_dir.and_then(|s| {
+            s.as_ref()
+                .to_str()
+                .and_then(|p| std::ffi::CString::new(p).ok())
+        });
+        let data_dir = data_dir.and_then(|s| {
+            s.as_ref()
+                .to_str()
+                .and_then(|p| std::ffi::CString::new(p).ok())
+        });
 
         unsafe {
             let r = self.core_startup.unwrap()(
                 crate::plugin::version_to_mupen(&crate::plugin::CORE_API_VERSION),
-                config_dir.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()),
-                data_dir.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()),
+                config_dir
+                    .as_ref()
+                    .map(|s| s.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                data_dir
+                    .as_ref()
+                    .map(|s| s.as_ptr())
+                    .unwrap_or(std::ptr::null()),
                 std::ptr::null_mut(), // debug callback context
                 Some(debug_callback),
                 std::ptr::null_mut(), // state callback data
-                None, // state callback fn
+                None,                 // state callback fn
             );
             if r != m64p_error_M64ERR_SUCCESS {
                 return Err(r.into());
@@ -295,7 +293,7 @@ impl Mupen {
     /// 3. Input
     /// 4. RSP
     pub fn attach_plugin(&mut self, plugin: Plugin) -> Result<(), Error> {
-        // Without this check, we get an unhelpful InvalidState 
+        // Without this check, we get an unhelpful InvalidState
         if !self.is_rom_open() {
             return Err(Error::NoRomOpen);
         }
@@ -359,7 +357,9 @@ impl Mupen {
 
     /// Execute the ROM. Blocking until the ROM is closed.
     pub fn execute(&self) -> Result<(), Error> {
-        let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_EXECUTE, 0, std::ptr::null_mut()) };
+        let ret = unsafe {
+            self.core.core_do_command.unwrap()(m64p_command_M64CMD_EXECUTE, 0, std::ptr::null_mut())
+        };
         if ret != m64p_error_M64ERR_SUCCESS {
             Err(ret.into())
         } else {
@@ -369,7 +369,9 @@ impl Mupen {
 
     /// Stop ROM execution.
     pub fn stop(&self) -> Result<(), Error> {
-        let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_STOP, 0, std::ptr::null_mut()) };
+        let ret = unsafe {
+            self.core.core_do_command.unwrap()(m64p_command_M64CMD_STOP, 0, std::ptr::null_mut())
+        };
         if ret != m64p_error_M64ERR_SUCCESS {
             Err(ret.into())
         } else {
@@ -379,7 +381,13 @@ impl Mupen {
 
     /// Close the ROM.
     pub fn close_rom(&mut self) -> Result<(), Error> {
-        let ret = unsafe { self.core.core_do_command.unwrap()(m64p_command_M64CMD_ROM_CLOSE, 0, std::ptr::null_mut()) };
+        let ret = unsafe {
+            self.core.core_do_command.unwrap()(
+                m64p_command_M64CMD_ROM_CLOSE,
+                0,
+                std::ptr::null_mut(),
+            )
+        };
         if ret != m64p_error_M64ERR_SUCCESS {
             Err(ret.into())
         } else {
